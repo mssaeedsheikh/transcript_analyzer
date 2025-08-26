@@ -1,11 +1,16 @@
-from langchain_chroma import Chroma  # Updated import
+import logging
+from langchain_chroma import Chroma
 from langchain_core.documents import Document
 from langchain.chains import RetrievalQA
 from langchain_community.llms import OpenAI
-from langchain_ollama import OllamaLLM  # Updated import
+from langchain_ollama import OllamaLLM
 from langchain.prompts import PromptTemplate
+from langchain.text_splitter import RecursiveCharacterTextSplitter
 from .embeddings import get_embeddings
+from .utils import parse_transcript, chunk_transcript_with_timestamps
 import os
+
+logger = logging.getLogger(__name__)
 
 
 def get_llm():
@@ -17,7 +22,7 @@ def get_llm():
             openai_api_key=os.getenv("OPENAI_API_KEY")
         )
     else:
-        return OllamaLLM(model=os.getenv("OLLAMA_MODEL", "mistral"))  # Updated class
+        return OllamaLLM(model=os.getenv("OLLAMA_MODEL", "mistral"))
 
 
 def generate_embeddings(chunks):
@@ -27,7 +32,8 @@ def generate_embeddings(chunks):
             page_content=chunk["text"],
             metadata={
                 "start_time": chunk["start_time"],
-                "end_time": chunk["end_time"]
+                "end_time": chunk["end_time"],
+                "chunk_id": f"{chunk['start_time']}-{chunk['end_time']}"
             }
         )
         documents.append(doc)
@@ -35,13 +41,34 @@ def generate_embeddings(chunks):
 
 
 def store_embeddings(documents, user_id, transcript_id):
-    vectorstore = Chroma.from_documents(  # This should now use the updated import
-        documents=documents,
-        embedding=get_embeddings(),
-        persist_directory=os.getenv("CHROMA_DIR", "./data/chroma"),
-        collection_name=f"{user_id}_{transcript_id}"
-    )
-    return vectorstore
+    """Store document embeddings in Chroma vector database"""
+    try:
+        vectorstore = Chroma.from_documents(
+            documents=documents,
+            embedding=get_embeddings(),
+            persist_directory=os.getenv("CHROMA_DIR", "./data/chroma"),
+            collection_name=f"{user_id}_{transcript_id}"
+        )
+        logger.info(f"Stored embeddings for {len(documents)} chunks in ChromaDB")
+        return vectorstore
+    except Exception as e:
+        logger.error(f"Error storing embeddings: {e}")
+        raise
+
+
+def process_and_store_transcript(content: str, user_id: str, transcript_id: str):
+    """Process transcript with proper chunking and store embeddings"""
+    # Parse and chunk transcript
+    segments = parse_transcript(content)
+    chunks = chunk_transcript_with_timestamps(segments)
+
+    # Generate embeddings
+    documents = generate_embeddings(chunks)
+
+    # Store in vector database
+    vectorstore = store_embeddings(documents, user_id, transcript_id)
+
+    return chunks, vectorstore
 
 
 def process_query(user_id, transcript_id, query):

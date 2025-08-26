@@ -29,7 +29,7 @@ class LocalJSONDB:
             with open(self.path, 'r') as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
-            return {"transcripts": {}, "queries": {}, "errors": {}}
+            return {"transcripts": {}, "queries": {}, "errors": {}, "query_history": {}}
 
     def _write_data(self, data):
         with open(self.path, 'w') as f:
@@ -141,6 +141,53 @@ class LocalJSONDB:
         except Exception as e:
             logger.error(f"Error getting user transcripts from local JSON: {e}")
             return {}
+
+    def get_query_history(self, user_id: str, transcript_id: str = None, limit: int = 50):
+        """Get query history for user, optionally filtered by transcript"""
+        try:
+            data = self._read_data()
+            history = []
+
+            # If no query_history exists, return empty list
+            if "query_history" not in data:
+                return history
+
+            # Filter by user_id and optionally transcript_id
+            for query_id, query_data in data["query_history"].items():
+                if query_data["user_id"] == user_id:
+                    if transcript_id is None or query_data["transcript_id"] == transcript_id:
+                        history.append(query_data)
+
+            # Sort by timestamp descending and limit
+            history.sort(key=lambda x: x["timestamp"], reverse=True)
+            return history[:limit]
+        except Exception as e:
+            logger.error(f"Error getting query history from local JSON: {e}")
+            return []
+
+    def save_query_history(self, user_id: str, transcript_id: str, query: str, response: dict):
+        """Save complete query history"""
+        try:
+            query_id = str(uuid.uuid4())
+            query_data = {
+                "query_id": query_id,
+                "user_id": user_id,
+                "transcript_id": transcript_id,
+                "query": query,
+                "response": response,
+                "timestamp": datetime.now().isoformat(),
+                "type": "query_history"
+            }
+
+            data = self._read_data()
+            if "query_history" not in data:
+                data["query_history"] = {}
+
+            data["query_history"][query_id] = query_data
+            self._write_data(data)
+            logger.info(f"Saved query history to local JSON: {query_id}")
+        except Exception as e:
+            logger.error(f"Error saving query history to local JSON: {e}")
 
 
 class FirestoreDB:
@@ -264,32 +311,85 @@ class FirestoreDB:
             logger.error(f"Error getting user transcripts from Firestore: {e}")
             return {}
 
+    def save_query_history(self, user_id: str, transcript_id: str, query: str, response: dict):
+        """Save complete query history"""
+        try:
+            query_id = str(uuid.uuid4())
+            query_data = {
+                "query_id": query_id,
+                "user_id": user_id,
+                "transcript_id": transcript_id,
+                "query": query,
+                "response": response,
+                "timestamp": datetime.now().isoformat(),
+                "type": "query_history"
+            }
+
+            doc_ref = self.client.collection("query_history").document(query_id)
+            doc_ref.set(query_data)
+            logger.info(f"Saved query history: {query_id}")
+        except Exception as e:
+            logger.error(f"Error saving query history: {e}")
+
+    def get_query_history(self, user_id: str, transcript_id: str = None, limit: int = 50):
+        """Get query history for user, optionally filtered by transcript"""
+        try:
+            query_ref = self.client.collection("query_history")
+            query = query_ref.where(
+                filter=firestore.FieldFilter("user_id", "==", user_id)
+            )
+
+            if transcript_id:
+                query = query.where(
+                    filter=firestore.FieldFilter("transcript_id", "==", transcript_id)
+                )
+
+            query = query.order_by("timestamp", direction=firestore.Query.DESCENDING).limit(limit)
+
+            docs = query.stream()
+            history = []
+
+            for doc in docs:
+                history.append(doc.to_dict())
+
+            return history
+        except Exception as e:
+            logger.error(f"Error getting query history: {e}")
+            return []
+
+    # Add similar methods to LocalJSONDB class
+
+
 
 # Helper functions
 def save_transcript_metadata(user_id, transcript_id, name, chunks):
     db = get_db()
     db.save_transcript_metadata(user_id, transcript_id, name, chunks)
 
-
 def has_transcript_access(user_id, transcript_id):
     db = get_db()
     return db.has_transcript_access(user_id, transcript_id)
-
 
 def get_cached_response(user_id, transcript_id, query):
     db = get_db()
     return db.get_cached_response(user_id, transcript_id, query)
 
-
 def cache_response(user_id, transcript_id, query, response):
     db = get_db()
     db.cache_response(user_id, transcript_id, query, response)
 
+# FIXED: These functions were calling the wrong methods
+def save_query_history(user_id, transcript_id, query, response):
+    db = get_db()
+    db.save_query_history(user_id, transcript_id, query, response)  # Fixed: was calling cache_response
+
+def get_query_history(user_id, transcript_id=None, limit=50):
+    db = get_db()
+    return db.get_query_history(user_id, transcript_id, limit)  # Fixed: was calling get_cached_response
 
 def save_processing_error(user_id, transcript_id, error_message):
     db = get_db()
     db.save_processing_error(user_id, transcript_id, error_message)
-
 
 def get_user_transcripts(user_id):
     db = get_db()

@@ -3,12 +3,30 @@ A FastAPI backend service for analyzing and querying transcripts using Retrieval
 
 ## Features
 
-- Transcript upload and indexing with timestamp extraction
-- Semantic Q&A with RAG using OpenAI or HuggingFace embeddings
-- Query caching and history
-- User access control and data isolation
-- Support for both Firestore and local JSON storage
-- Docker containerization
+- Transcript Upload and Indexing
+  - Accept pre-formatted plain text files containing transcripts with timestamps
+  - Token-aware chunking using LangChain text splitters
+  - Extract start and end timestamps for each chunk 
+  - Generate embeddings using OpenAI or HuggingFace 
+  - Store embedded chunks in Chroma vector database
+
+- Semantic Q&A with RAG 
+  - Accept user queries on previously uploaded transcripts 
+  - Perform similarity search using embedded chunks 
+  - Use LangChain RAG flow to answer questions 
+  - Response includes:
+    - Concise, grounded answer 
+    - List of timestamps where information appears 
+    - Source transcript chunks for transparency
+
+- Caching and Query History 
+  - Cache previous queries per video per user to avoid redundant LLM calls 
+  - Save query/response history in Firestore or local storage, scoped by user_id 
+  - Configurable cache TTL (default: 7 days)
+
+- User Access Control 
+  - Users can only view and query their own transcripts and history 
+  - User_id scoping and validation logic
 
 ## Tech Stack
 
@@ -65,6 +83,20 @@ curl -X POST -H "Content-Type: application/json" \
   -d '{"user_id": "user123", "transcript_id": "transcript_id", "query": "What are the main points?"}' \
   http://localhost:8000/query
 ```
+Example Response:
+```json
+{
+  "answer": "Founders often focus too much on their product and not enough on the market...",
+  "timestamps": [
+    {"start": "00:01:30", "end": "00:02:10"},
+    {"start": "00:03:45", "end": "00:04:10"}
+  ],
+  "source_chunks": [
+    "One of the biggest mistakes founders make is focusing too much on the product...",
+    "Another issue is when founders don't handle criticism well during Q&A..."
+  ]
+}
+```
 
 ### Get User Transcripts
 ```bash
@@ -114,7 +146,41 @@ transcript_analyzer/
 ```
 
 ## Configuration Options
+### Environment Configuration
+Create a .env file in the root directory:
+```env
+# Core
+APP_NAME=llm-transcript-rag
+ENV=dev
+PORT=8000
 
+# Storage paths
+DATA_DIR=./data
+CHROMA_DIR=./data/chroma
+LOCAL_JSON_DB=./data/local_store.json
+
+# Embeddings
+EMBEDDINGS_PROVIDER=huggingface
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_EMBEDDING_MODEL=text-embedding-3-small
+HF_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2
+
+# LLM
+LLM_PROVIDER=ollama
+OPENAI_MODEL=gpt-4o-mini
+OLLAMA_MODEL=mistral
+
+# Firestore (optional)
+GOOGLE_APPLICATION_CREDENTIALS=./firebase-key.json
+FIRESTORE_PROJECT_ID=your_firestore_project_id
+
+# Caching
+CACHE_TTL_SECONDS=604800
+
+# Chunking configuration
+CHUNK_SIZE=1000
+CHUNK_OVERLAP=200
+```
 ### Storage Backend
 The application can use either Firestore or local JSON storage:
 - Firestore: Set *FIRESTORE_PROJECT_ID* and provide *firebase-key.json*

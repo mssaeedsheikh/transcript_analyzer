@@ -78,7 +78,7 @@ async def upload_transcript(
 @app.post("/query")
 async def query_transcript(request: QueryRequest):
     try:
-        # Validate user has access to this transcript
+        # Validate user access
         if not storage.has_transcript_access(request.user_id, request.transcript_id):
             raise HTTPException(status_code=403, detail="Access denied to transcript")
 
@@ -106,6 +106,14 @@ async def query_transcript(request: QueryRequest):
             result
         )
 
+        # Save to query history
+        storage.save_query_history(
+            request.user_id,
+            request.transcript_id,
+            request.query,
+            result
+        )
+
         return result
     except HTTPException:
         raise
@@ -123,6 +131,19 @@ async def get_transcripts(user_id: str):
         raise HTTPException(status_code=500, detail=f"Failed to fetch transcripts: {str(e)}")
 
 
+@app.get("/query-history/{user_id}")
+async def get_query_history(user_id: str, transcript_id: Optional[str] = None, limit: int = 50):
+    try:
+        # Validate user access
+        if transcript_id and not storage.has_transcript_access(user_id, transcript_id):
+            raise HTTPException(status_code=403, detail="Access denied to transcript")
+
+        history = storage.get_query_history(user_id, transcript_id, limit)
+        return history
+    except Exception as e:
+        logger.error(f"Failed to fetch query history: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch query history: {str(e)}")
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
@@ -130,14 +151,15 @@ async def health_check():
 
 def process_transcript(content: str, user_id: str, transcript_id: str, name: str):
     try:
-        chunks = utils.parse_transcript(content)
-        documents = rag.generate_embeddings(chunks)
-        rag.store_embeddings(documents, user_id, transcript_id)
+        # Use the new chunking function
+        chunks, vectorstore = rag.process_and_store_transcript(content, user_id, transcript_id)
+
+        # Save metadata
         storage.save_transcript_metadata(user_id, transcript_id, name, chunks)
-        logger.info(f"Successfully processed transcript: {transcript_id}")
+
+        logger.info(f"Successfully processed transcript: {transcript_id} with {len(chunks)} chunks")
     except Exception as e:
         logger.error(f"Error processing transcript: {str(e)}")
-        # Log error to storage for user to see
         storage.save_processing_error(user_id, transcript_id, str(e))
 
 
