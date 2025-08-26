@@ -50,7 +50,17 @@ A FastAPI backend service for analyzing and querying transcripts using Retrieval
 ## *Step 2 --- Set Up LLM*
 - setup *ollama* on local or on remote if not using OpenAI because of limitations of paid account
 - for installing ollama use Docker installation process
+```bash
+# install ollama
+docker run -d -v ollama:/root/.ollama -p 11434:11434 --name ollama ollama/ollama
+ 
+# download mistral model
+docker exec -it ollama ollama pull mistral
 
+# Example one-off prompt:
+docker exec -it ollama ollama run mistral "Explain Docker in simple terms"
+
+```
 ## *Step 3 --- Build and Run with Docker*
 ```bash
 # Build the Docker image
