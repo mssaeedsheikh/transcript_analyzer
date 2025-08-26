@@ -38,7 +38,7 @@ A FastAPI backend service for analyzing and querying transcripts using Retrieval
 - **Containerization**: Docker
 
 
-1. **Step 1 --- Set Up Firebase (Optional)**
+## *Step 1 --- Set Up Firebase (Optional)*
 
 **If using Firestore:**
 - Create a Firebase project in the Firebase Console
@@ -47,7 +47,11 @@ A FastAPI backend service for analyzing and querying transcripts using Retrieval
 - Place the key file in the project root directory
 - Update the FIRESTORE_PROJECT_ID in your .env file
 
-2. **Step 2 --- Build and Run with Docker**
+## *Step 2 --- Set Up LLM*
+- setup *ollama* on local or on remote if not using OpenAI because of limitations of paid account
+- for installing ollama use Docker installation process
+
+## *Step 3 --- Build and Run with Docker*
 ```bash
 # Build the Docker image
 docker build -t transcript-analyzer .
@@ -56,12 +60,112 @@ docker build -t transcript-analyzer .
 docker run -p 8000:8000 --env-file .env -v $(pwd)/data:/app/data transcript-analyzer
 ```
 
-3. **Step 3 --- Access the Application**
+## *Step 4 --- Access the Application*
 - The API will be available at http://localhost:8000
 - API Documentation: http://localhost:8000/docs
 - Health Check: http://localhost:8000/health
 
-4. **Step 4 ---  API Usage**
+## User ID Flow
+
+The application uses a simple user ID-based authentication system where:
+
+1. Each user is identified by a unique user_id string 
+2. All data (transcripts, queries, query_history) is scoped to the user_id 
+3. Users can only access their own data 
+4. The user_id is passed in all API requests
+
+### How to Use User IDs
+1. Choose a user identification system: You can use:
+   - Email addresses 
+   - Database IDs 
+   - UUIDs 
+   - Authentication tokens (JWT sub claims)
+2. Pass the user_id in all requests:
+   - Upload: user_id form field 
+   - Query: user_id in JSON body 
+   - History: user_id in URL path
+3. Example workflow:
+```bash
+    # 1. Upload a transcript for a user
+    curl -X POST -F "user_id=user123@example.com" \
+      -F "transcript_name=My Podcast" \
+      -F "file=@podcast.txt" \
+      http://localhost:8000/upload
+    
+    # 2. Query the transcript
+    curl -X POST -H "Content-Type: application/json" \
+      -d '{"user_id": "user123@example.com", "transcript_id": "abc123", "query": "What was discussed?"}' \
+      http://localhost:8000/query
+    
+    # 3. Get query history
+    curl "http://localhost:8000/query-history/user123@example.com?transcript_id=abc123&limit=10"
+```
+## Query History Flow
+The application automatically saves all queries and responses to a query history, which can be retrieved later.
+
+### How to Use Query History
+1. Automatic Saving: All queries are automatically saved to history
+2. **Retrieve History:**
+```bash
+    # Get all query history for a user
+    curl "http://localhost:8000/query-history/user123@example.com?limit=20"
+    
+    # Get query history for a specific transcript
+    curl "http://localhost:8000/query-history/user123@example.com?transcript_id=abc123&limit=10"
+```
+3. **History Response Format:**
+```json
+[
+  {
+    "query_id": "unique-query-id",
+    "user_id": "user123@example.com",
+    "transcript_id": "abc123",
+    "query": "What was discussed?",
+    "response": {
+      "answer": "The podcast discussed...",
+      "timestamps": [{"start": "00:01:30", "end": "00:02:10"}],
+      "source_chunks": ["One of the topics discussed was..."]
+    },
+    "timestamp": "2025-08-27T02:58:15.340000",
+    "type": "query_history"
+  }
+]
+```
+4. **Use Cases:**
+   - Display previous queries to users
+   - Avoid redundant processing 
+   - Analyze user behavior 
+   - Implement "saved queries" functionality
+
+
+## Firestore Indexes
+If using Firestore, you need to create indexes for optimal performance. Firestore requires indexes for queries that:
+1. Filter on multiple fields 
+2. Order by a field with filtering on different fields
+
+### Required Indexes
+1. **For query history:**
+   - Collection: query_history 
+   - Fields: user_id (Ascending), timestamp (Descending)
+   - Fields: user_id (Ascending), transcript_id (Ascending), timestamp (Descending)
+2. **For transcripts:**
+   - Collection: transcripts
+   - Fields: user_id (Ascending)
+3. **For queries cache:**
+   - Collection: queries
+   - Fields: user_id (Ascending), transcript_id (Ascending), query (Ascending), timestamp (Descending)
+
+### How to Create Indexes
+1. Go to the Firebase Console 
+2. Select your project 
+3. Go to Firestore Database → Indexes 
+4. Click "Create Index"
+5. Enter the collection and field configurations as above
+
+Alternatively, you can let Firestore create the indexes automatically by running the queries first and following the link in the error message.
+
+
+## *Step 5 ---  API Usage*
 
 ### Upload a Transcript
 ```bash
@@ -103,7 +207,7 @@ Example Response:
 curl http://localhost:8000/transcripts/{user123}
 ```
 
-5. **Step 5 --- Development**
+## *Step 6 --- Development*
 
 ### Without Docker
 1. Create a virtual environment:
@@ -201,10 +305,10 @@ The application can use either Firestore or local JSON storage:
 
 
 ## 📦 API Overview
-- `POST /upload_transcript` — form-data: `user_id`, file: `file` (.txt)
-- `POST /query` — JSON: `{ user_id, transcript_id, question, top_k? }`
+- `POST /upload_transcript` — form-data: `user_id`, file: `file` (.txt), `transcript_name`
+- `POST /query` — JSON: `{ user_id, transcript_id, query, top_k? }`
 - `GET /transcripts` — query: `user_id`
-- `GET /history` — query: `user_id`, `transcript_id`
+- `GET /history` — query: `user_id`, `transcript_id`, `limit`
 
 
 ### Input Transcript Format (example)
